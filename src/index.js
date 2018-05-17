@@ -11,6 +11,10 @@ const db = new Dexie('destinyManifest');
 db.version(1).stores({
   manifestBlob: '&key, data'
 });
+db.version(2).stores({
+  manifestBlob: '&key, data',
+  allData: '&key, data'
+});
 
 function fetchManifestDBPath() {
   return fetch('https://www.bungie.net/platform/Destiny2/Manifest/')
@@ -60,18 +64,16 @@ function unzipManifest(blob) {
         zipReader.getEntries(entries => {
           if (entries.length) {
             console.log('Found', entries.length, 'entries within zip file');
+            console.log('Loading first file...', entries[0].filename);
+
             entries[0].getData(new zip.BlobWriter(), blob => {
-              const blobReader = new FileReader();
-              blobReader.addEventListener('error', e => {
-                reject(e);
-              });
-              blobReader.addEventListener('load', () => {
-                console.log('Loading first file...');
-                zipReader.close(() => {
-                  resolve(blobReader.result);
-                });
-              });
-              blobReader.readAsArrayBuffer(blob);
+              const link = document.createElement('a');
+              link.href = window.URL.createObjectURL(blob);
+              link.innerHTML = 'Download file';
+              link.download = 'manifestDatabase.sqlite';
+              document.body.appendChild(link);
+
+              resolve(blob);
             });
           }
         });
@@ -83,41 +85,79 @@ function unzipManifest(blob) {
   });
 }
 
-function loadManifest() {
-  return fetchManifestDBPath()
-    .then(fetchManifest)
+function loadManifest(dbPath) {
+  return fetchManifest(dbPath)
     .then(data => {
       console.log('Got a blob db', data);
       return unzipManifest(data);
     })
-    .then(data => {
-      console.log('Got unziped db', data);
-      return data;
+    .then(manifestBlob => {
+      console.log('Got unziped db', manifestBlob);
+      return manifestBlob;
     });
 }
 
-Promise.all([requireDatabase(), loadManifest()])
-  .then(([SQLLib, typedArray]) => {
-    console.log('Loaded both SQL library and manifest data');
-    console.log('typedArray:', typedArray);
-    const db = new SQLLib.Database(typedArray);
-
-    db._exec = db.exec;
-    db.exec = (...args) => {
-      console.log(`Executing '%c${args[0]}%c'`, 'color: blue', 'color: black');
-      return db._exec(...args);
+function openDBFromBlob(SQLLib, blob) {
+  const url = window.URL.createObjectURL(blob);
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'arraybuffer';
+    xhr.onload = function(e) {
+      const uInt8Array = new Uint8Array(this.response);
+      resolve(new SQLLib.Database(uInt8Array));
     };
+    xhr.send();
+  });
+}
 
-    console.log('Got proper SQLite DB', db);
+function allDataFromRemote(dbPath) {
+  return Promise.all([requireDatabase(), loadManifest(dbPath)])
+    .then(([SQLLib, manifestBlob]) => {
+      console.log('Loaded both SQL library and manifest blob');
+      return openDBFromBlob(SQLLib, manifestBlob);
+    })
+    .then(db => {
+      console.log('Got proper SQLite DB', db);
 
-    const allTables = db.exec(
-      `SELECT name FROM sqlite_master WHERE type='table';`
-    );
+      const allTables = db
+        .exec(`SELECT name FROM sqlite_master WHERE type='table';`)[0]
+        .values.map(a => a[0]);
 
-    console.log('All tables', allTables);
+      console.log('All tables', allTables);
 
-    const items = getAllRecords(db, 'DestinyRaceDefinition');
-    console.log('Items', { items });
+      const allData = allTables.reduce((acc, tableName) => {
+        console.log('Getting all records for', tableName);
+        acc[tableName] = getAllRecords(db, tableName);
+        return acc;
+      }, {});
+
+      return allData;
+    });
+}
+
+fetchManifestDBPath()
+  .then(dbPath => {
+    window.perfStart = performance.now();
+
+    console.log('dbPath', dbPath);
+    return Promise.all([db.allData.get(dbPath), Promise.resolve(dbPath)]);
+  })
+  .then(([cachedData, dbPath]) => {
+    if (cachedData) {
+      return cachedData.data;
+    }
+
+    return allDataFromRemote(dbPath).then(allData => {
+      db.allData.put({ key: dbPath, data: allData });
+
+      return allData;
+    });
+  })
+  .then(allData => {
+    window.perfEnd = performance.now();
+    console.log('Time:', perfEnd - perfStart);
+    console.log('Items', allData);
   })
   .catch(err => {
     console.error(err);

@@ -11,6 +11,11 @@ function importAsmJs() {
 export function getAllRecords(db, table) {
   const rows = db.exec(`SELECT json FROM ${table}`);
   const result = {};
+
+  if (!rows[0]) {
+    return null;
+  }
+
   rows[0].values.forEach(row => {
     const obj = JSON.parse(row);
     result[obj.hash] = obj;
