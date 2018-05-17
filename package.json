@@ -1,0 +1,19 @@
+{
+  "name": "destinyManifestInBrowser",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "webpack --mode development --watch"
+  },
+  "dependencies": {
+    "@destiny-item-manager/zip.js": "github:DestinyItemManager/zip.js",
+    "axios": "^0.18.0",
+    "dexie": "^2.0.3",
+    "file-loader": "^1.1.11",
+    "imports-loader": "^0.8.0",
+    "sql.js": "github:DestinyItemManager/sql.js",
+    "webpack": "^4.8.3",
+    "webpack-cli": "^2.1.3"
+  }
+}
